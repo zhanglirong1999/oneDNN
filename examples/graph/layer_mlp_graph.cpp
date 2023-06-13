@@ -40,8 +40,9 @@ using namespace dnnl::graph;
 using data_type = logical_tensor::data_type;
 using layout_type = logical_tensor::layout_type;
 void mlp_graph(dnnl::engine::kind ekind){
+    static int warm_up = 10;
+    static int iter_num = 10;
     /// create a graph
-    auto start_time = high_resolution_clock::now();
 
     graph g(ekind);
 
@@ -224,19 +225,30 @@ void mlp_graph(dnnl::engine::kind ekind){
             /// Execute the compiled partition 1 on the specified stream.
             /// @snippet cpu_get_started.cpp Execute compiled partition 1
             //[Execute compiled partition]
-            cp.execute(strm, inputs_ts, outputs_ts);
+            // warm up
+            for (int i = 0; i < warm_up; i++) {
+                cp.execute(strm, inputs_ts, outputs_ts);
+            }
+
+            auto start_time = high_resolution_clock::now();
+            for (int i = 0; i < iter_num; i++) {
+                cp.execute(strm, inputs_ts, outputs_ts);
+            }
+            auto end_time = high_resolution_clock::now();
+            auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
             //[Execute compiled partition]
+            std::cout << "Elapsed time on mlp in Graph API: " << elapsed_time << " ms" << std::endl;
         } else {
             std::cout << "program: got unsupported partition, users need "
                 "handle the operators by themselves." << std::endl;
         }
     }
 
-    auto end_time = high_resolution_clock::now();
-    auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
+    // auto end_time = high_resolution_clock::now();
+    // auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
 
     // Print the elapsed time.
-    std::cout << "Elapsed time on mlp in Graph API: " << elapsed_time << " ms" << std::endl;
+    // std::cout << "Elapsed time on mlp in Graph API: " << elapsed_time << " ms" << std::endl;
     std::cout << "End of graph computation."  << std::endl;
 
 }

@@ -48,7 +48,8 @@ using tag = memory::format_tag;
 using dt = memory::data_type;
 
 void mlp_fuse_example(dnnl::engine::kind engine_kind) {
-    auto start_time = high_resolution_clock::now();
+    static int warm_up = 10;
+    static int iter_num = 10;
 
     // Create execution dnnl::engine.
     dnnl::engine engine(engine_kind, 0);
@@ -153,8 +154,6 @@ void mlp_fuse_example(dnnl::engine::kind engine_kind) {
     matmul_args.insert({DNNL_ARG_BIAS, bias1_mem});
     matmul_args.insert({DNNL_ARG_DST, hidden_mem});
 
-    matmul_fc1.execute(engine_stream, matmul_args);
-
     // ReLU: max(alpha * x, x) + beta
     // auto relu_pd = eltwise_forward::primitive_desc(engine,
     //             prop_kind::forward_inference, algorithm::eltwise_relu, hidden_md, hidden_md,
@@ -184,9 +183,18 @@ void mlp_fuse_example(dnnl::engine::kind engine_kind) {
     matmul_args2.insert({DNNL_ARG_BIAS, bias2_mem});
     matmul_args2.insert({DNNL_ARG_DST, dst_mem});
 
+    // warm up
+    for (int i = 0; i < warm_up; i++) {
+        matmul_fc1.execute(engine_stream, matmul_args);
+        matmul_fc2.execute(engine_stream, matmul_args2);
+    }
 
-    matmul_fc2.execute(engine_stream, matmul_args2);
-
+    auto start_time = high_resolution_clock::now();
+    for (int i = 0; i < iter_num; i++) {
+        matmul_fc1.execute(engine_stream, matmul_args);
+        matmul_fc2.execute(engine_stream, matmul_args2);
+    }
+    auto end_time = high_resolution_clock::now();
 
     // Wait for the computation to finalize.
     engine_stream.wait();
@@ -195,7 +203,6 @@ void mlp_fuse_example(dnnl::engine::kind engine_kind) {
     // read_from_dnnl_memory(hidden_data.data(), hidden_mem);
     read_from_dnnl_memory(dst_data.data(), dst_mem);
 
-    auto end_time = high_resolution_clock::now();
     auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
 
     // Print the elapsed time.

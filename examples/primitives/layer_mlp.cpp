@@ -48,7 +48,8 @@ using tag = memory::format_tag;
 using dt = memory::data_type;
 
 void mlp_example(dnnl::engine::kind engine_kind) {
-    auto start_time = high_resolution_clock::now();
+    static int warm_up = 10;
+    static int iter_num = 10;
 
     // Create execution dnnl::engine.
     dnnl::engine engine(engine_kind, 0);
@@ -153,15 +154,12 @@ void mlp_example(dnnl::engine::kind engine_kind) {
     matmul_args.insert({DNNL_ARG_BIAS, bias1_mem});
     matmul_args.insert({DNNL_ARG_DST, hidden_mem});
 
-    // Primitive execution: first layer mutmul.
-    matmul_fc1.execute(engine_stream, matmul_args);
 
     // ReLU: max(alpha * x, x) + beta
     auto relu_pd = eltwise_forward::primitive_desc(engine,
                 prop_kind::forward_inference, algorithm::eltwise_relu, hidden_md, hidden_md,
                 alpha, beta);
     auto relu = eltwise_forward(relu_pd);
-    relu.execute(engine_stream, {{DNNL_ARG_SRC, hidden_mem}, {DNNL_ARG_DST, hidden_mem}});
 
     // second layer mutmul
     auto matmul_pd2 = matmul::primitive_desc(
@@ -176,9 +174,6 @@ void mlp_example(dnnl::engine::kind engine_kind) {
     matmul_args2.insert({DNNL_ARG_BIAS, bias2_mem});
     matmul_args2.insert({DNNL_ARG_DST, dst_mem});
 
-    // Primitive execution
-    matmul_fc2.execute(engine_stream, matmul_args2);
-
     // second layer relu
     // ReLU: max(alpha * x, x) + beta
     const float alpha2 = 0.7;
@@ -187,8 +182,29 @@ void mlp_example(dnnl::engine::kind engine_kind) {
                 prop_kind::forward_inference, algorithm::eltwise_relu, dst_md, dst_md,
                 alpha2, beta2);
     auto relu2 = eltwise_forward(relu_pd2);
-    relu2.execute(engine_stream, {{DNNL_ARG_SRC, dst_mem}, {DNNL_ARG_DST, dst_mem}});
 
+    // warm up
+    for (int i = 0; i < warm_up; i++) {
+        // Primitive execution: first layer mutmul.
+        matmul_fc1.execute(engine_stream, matmul_args);
+        relu.execute(engine_stream, {{DNNL_ARG_SRC, hidden_mem}, {DNNL_ARG_DST, hidden_mem}});
+
+        // Primitive execution
+        matmul_fc2.execute(engine_stream, matmul_args2);
+        relu2.execute(engine_stream, {{DNNL_ARG_SRC, dst_mem}, {DNNL_ARG_DST, dst_mem}});
+    }
+
+    auto start_time = high_resolution_clock::now();
+    for (int i = 0; i < iter_num; i++) {
+        // Primitive execution: first layer mutmul.
+        matmul_fc1.execute(engine_stream, matmul_args);
+        relu.execute(engine_stream, {{DNNL_ARG_SRC, hidden_mem}, {DNNL_ARG_DST, hidden_mem}});
+
+        // Primitive execution
+        matmul_fc2.execute(engine_stream, matmul_args2);
+        relu2.execute(engine_stream, {{DNNL_ARG_SRC, dst_mem}, {DNNL_ARG_DST, dst_mem}});
+    }
+    auto end_time = high_resolution_clock::now();
 
     // Wait for the computation to finalize.
     engine_stream.wait();
@@ -197,7 +213,6 @@ void mlp_example(dnnl::engine::kind engine_kind) {
     // read_from_dnnl_memory(hidden_data.data(), hidden_mem);
     read_from_dnnl_memory(dst_data.data(), dst_mem);
 
-    auto end_time = high_resolution_clock::now();
     auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
 
     // Print the elapsed time.
