@@ -75,23 +75,15 @@ void mlp_graph(dnnl::engine::kind ekind){
         6, data_type::f32, bias2_dims, layout_type::undef};
 
     // Create the operations for the MLP
-    // op input {0, op::kind::Input, {}, {input_desc}, "input"};
-    // op hidden_weight {1, op::kind::Input, {}, {weights1_desc}, "hidden_weight"};
-    // op hidden_bias {2, op::kind::Input, {}, {bias1_desc}, "hidden_bias"};
     op hidden_matmul {0, op::kind::MatMul, {input_desc, weights1_desc, bias1_desc},
         {hidden_desc}, "hidden"};
     op relu {1, op::kind::ReLU, {hidden_desc}, {hidden_desc}, "relu"};
-    // op output_weight {5, op::kind::Input, {}, {output_weight_desc}, "output_weight"};
-    // op output_bias {6, op::kind::Input, {}, {output_bias_desc}, "output_bias"};
-
     op output_matmul {2, op::kind::MatMul, {hidden_desc, weights2_desc, bias2_desc},
         {output_desc}, "matmul"};
-
     op relu_2 {3, op::kind::ReLU, {output_desc}, {output_desc}, "relu"};
 
     // Set the attributes for the operations
     // hidden_matmul.set_attr<std::string>(op::attr::data_format, "NXC");
-    // hidden_matmul.set_attr<std::string>(op::attr::weights_format, "OIX");
 
     g.add_op(hidden_matmul);
     g.add_op(relu);
@@ -117,21 +109,7 @@ void mlp_graph(dnnl::engine::kind ekind){
     allocator alloc {};
     dnnl::engine eng =make_engine_with_allocator(ekind, 0, alloc);
     dnnl::stream strm {eng};
-
-    /// create a new engine and stream
-    // allocator alloc {dnnl::graph::sycl_interop::make_allocator(
-    //         sycl_malloc_wrapper,
-    //         sycl_free_wrapper)};
-            
-    // dnnl::engine eng =make_engine_with_allocator(ekind, 0, alloc);
-    // dnnl::stream strm {eng};
-
-
-    // dnnl::engine eng(ekind, 0);
-    // Create dnnl::stream.
-    // dnnl::stream strm(eng);
     
-
     // mapping from logical tensor id to output tensors
     // used to the connection relationship between partitions (e.g partition 0's
     // output tensor is fed into partition 1)
