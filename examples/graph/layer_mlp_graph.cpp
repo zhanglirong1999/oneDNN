@@ -40,27 +40,32 @@ using namespace dnnl::graph;
 using data_type = logical_tensor::data_type;
 using layout_type = logical_tensor::layout_type;
 void mlp_graph(dnnl::engine::kind ekind){
+    /// create a graph
     static int warm_up = 10;
     static int iter_num = 10;
-    /// create a graph
 
     graph g(ekind);
 
-    std::vector<int64_t> input_dims {1, 128, 128};
+    std::vector<int64_t> input_dims {1, 1, 128};
     std::vector<int64_t> weights1_dims {1, 128, 64};
     std::vector<int64_t> bias1_dims {1, 1, 64};
 
-    std::vector<int64_t> weights2_dims {1, 64, 32};
-    std::vector<int64_t> bias2_dims {1, 1, 32};
+    std::vector<int64_t> weights2_dims {1, 64, 2};
+    std::vector<int64_t> bias2_dims {1, 1, 2};
 
-    std::vector<int64_t> hidden_dims {1, 128, 64};
-    std::vector<int64_t> output_dims {1, 128, 32};
+    std::vector<int64_t> hidden_dims {1, 1, 64};
+    std::vector<int64_t> output_dims {1, 1, 2};
+
+    std::vector<int64_t> hidden_tmp_dims {1, 1, 64};
+    std::vector<int64_t> output_tmp_dims {1, 1, 2};
+
     // Create logical tensors for the input, hidden, and output layers
     logical_tensor input_desc {0, data_type::f32, input_dims, layout_type::undef};
     logical_tensor hidden_desc {1, data_type::f32, hidden_dims, layout_type::undef};
     /// ndims = 4, let the library to calculate the output shape.
-    // logical_tensor output_desc {2, data_type::f32, output_dims, layout_type::undef};
-    logical_tensor output_desc {2, data_type::f32, 3, layout_type::undef};
+    logical_tensor output_desc {2, data_type::f32, output_dims, layout_type::undef};
+    // logical_tensor output_desc {2, data_type::f32, 3, layout_type::undef};
+
 
     logical_tensor weights1_desc {
         3, data_type::f32, weights1_dims, layout_type::undef};
@@ -74,26 +79,34 @@ void mlp_graph(dnnl::engine::kind ekind){
     logical_tensor bias2_desc {
         6, data_type::f32, bias2_dims, layout_type::undef};
 
+    logical_tensor hidden_tmp_desc {7, data_type::f32, hidden_tmp_dims, layout_type::undef};
+    /// ndims = 4, let the library to calculate the output shape.
+    logical_tensor output_tmp_desc {8, data_type::f32, output_tmp_dims, layout_type::undef};
+
+
     // Create the operations for the MLP
     op hidden_matmul {0, op::kind::MatMul, {input_desc, weights1_desc, bias1_desc},
-        {hidden_desc}, "hidden"};
-    op relu {1, op::kind::ReLU, {hidden_desc}, {hidden_desc}, "relu"};
+        {hidden_tmp_desc}, "hidden"};
+    op relu {1, op::kind::ReLU, {hidden_tmp_desc}, {hidden_desc}, "relu"};
+
     op output_matmul {2, op::kind::MatMul, {hidden_desc, weights2_desc, bias2_desc},
-        {output_desc}, "matmul"};
-    op relu_2 {3, op::kind::ReLU, {output_desc}, {output_desc}, "relu"};
+        {output_tmp_desc}, "matmul"};
+
+    op relu_2 {3, op::kind::ReLU, {output_tmp_desc}, {output_desc}, "relu"};
 
     // Set the attributes for the operations
     // hidden_matmul.set_attr<std::string>(op::attr::data_format, "NXC");
+    // hidden_matmul.set_attr<std::string>(op::attr::weights_format, "OIX");
 
     g.add_op(hidden_matmul);
     g.add_op(relu);
-    // g.add_op(output_matmul);
-    // g.add_op(relu_2);
+    g.add_op(output_matmul);
+    g.add_op(relu_2);
 
     // Finalize the graph
     g.finalize();
-
     auto partitions = g.get_partitions();
+
     std::cout << "size of partition: " <<partitions.size()  << std::endl;
 
     std::unordered_set<size_t> ids_with_any_layout;
@@ -109,6 +122,7 @@ void mlp_graph(dnnl::engine::kind ekind){
     allocator alloc {};
     dnnl::engine eng =make_engine_with_allocator(ekind, 0, alloc);
     dnnl::stream strm {eng};
+
     
     // mapping from logical tensor id to output tensors
     // used to the connection relationship between partitions (e.g partition 0's
@@ -128,6 +142,8 @@ void mlp_graph(dnnl::engine::kind ekind){
             std::vector<logical_tensor> inputs = partition.get_input_ports();
             std::vector<logical_tensor> outputs = partition.get_output_ports();
 
+            //对于每个逻辑张量，如果其是另一个分区的输出，则将其更新为已查询的逻辑张量。
+            //否则，将其布局转换为实际的内存布局
             // update input logical tensors with concrete layout
             for (size_t idx = 0; idx < inputs.size(); ++idx) {
                 size_t id = inputs[idx].get_id();
@@ -159,6 +175,7 @@ void mlp_graph(dnnl::engine::kind ekind){
             /// input and output logical tensors.
             /// @snippet cpu_get_started.cpp Compile partition
             //[Compile partition]
+            // 编译分区
             compiled_partition cp = partition.compile(inputs, outputs, eng);
             //[Compile partition]
 
@@ -216,17 +233,18 @@ void mlp_graph(dnnl::engine::kind ekind){
             auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
             //[Execute compiled partition]
             std::cout << "Elapsed time on mlp in Graph API: " << elapsed_time << " ms" << std::endl;
+
         } else {
             std::cout << "program: got unsupported partition, users need "
                 "handle the operators by themselves." << std::endl;
         }
     }
 
+
     // auto end_time = high_resolution_clock::now();
     // auto elapsed_time = duration_cast<milliseconds>(end_time - start_time).count();
 
     // Print the elapsed time.
-    // std::cout << "Elapsed time on mlp in Graph API: " << elapsed_time << " ms" << std::endl;
     std::cout << "End of graph computation."  << std::endl;
 
 }
